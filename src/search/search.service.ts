@@ -73,6 +73,7 @@ export class SearchService {
           product.name,
           product.description
         );
+        console.log("Explaination : ",explanation)
         return {
           ...product,
           relevance_explanation: explanation,
