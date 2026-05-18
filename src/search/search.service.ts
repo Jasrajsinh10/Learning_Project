@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { UpdateSearchDto } from './dto/update-search.dto';
 import { getEmbedding } from 'src/embed/embedding';
 import { pool } from 'src/database/db';
 import { AddProductDto } from './dto/create-product.dto';
@@ -14,6 +13,7 @@ export class SearchService {
   ) { }
 
   async searchProducts(query: string) {
+    console.log(query)
     if (!query || !query.trim()) {
       throw new Error("Query is empty");
     }
@@ -73,7 +73,6 @@ export class SearchService {
           product.name,
           product.description
         );
-        console.log("Explaination : ",explanation)
         return {
           ...product,
           relevance_explanation: explanation,

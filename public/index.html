@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexStore | Seamless Search</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Notification Toast -->
+    <div id="notification" class="toast"></div>
+
+    <!-- Auth Container (Login / Register) -->
+    <div id="auth-view" class="view active glass-panel">
+        <div class="auth-box">
+            <h1 id="auth-title">Welcome Back</h1>
+            <p id="auth-subtitle">Login to continue to your dashboard</p>
+
+            <form id="auth-form">
+                <div class="input-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" placeholder="Enter your username" required>
+                </div>
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" placeholder="Enter your password" required>
+                </div>
+                <button type="submit" id="auth-submit-btn" class="btn primary-btn">Login</button>
+            </form>
+            
+            <div class="auth-switch">
+                <p id="auth-switch-text">Don't have an account? <a href="#" id="toggle-auth">Register</a></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Home Container (Search) -->
+    <div id="home-view" class="view">
+        <header class="glass-nav">
+            <div class="logo">NexStore</div>
+            <div class="user-controls">
+                <span id="welcome-msg"></span>
+                <button id="logout-btn" class="btn outline-btn">Logout</button>
+            </div>
+        </header>
+
+        <main class="search-container glass-panel">
+            <h2>Find what you're looking for</h2>
+            <p>Describe what you need, and our AI will find the best match.</p>
+            
+            <form id="search-form" class="search-bar">
+                <input type="text" id="search-input" placeholder="e.g. A laptop with great battery life for coding..." required>
+                <button type="submit" class="btn primary-btn" id="search-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                </button>
+            </form>
+
+            <!-- Loading Spinner -->
+            <div id="loading-spinner" class="spinner hidden"></div>
+
+            <!-- Search Results -->
+            <div id="search-results" class="results-grid"></div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

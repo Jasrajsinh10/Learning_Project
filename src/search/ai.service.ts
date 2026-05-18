@@ -1,13 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import Groq from 'groq-sdk';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AiService {
   private groq: Groq;
 
-  constructor() {
+  constructor(private readonly configService: ConfigService) {
     this.groq = new Groq({
-      apiKey: process.env.GROQ_API_KEY,
+      apiKey: this.configService.get<string>('GROQ_API_KEY'),
     });
   }
 
