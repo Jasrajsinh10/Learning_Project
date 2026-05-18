@@ -83,7 +83,7 @@ export class SearchService {
     console.log("Results:", resultsWithExplanations);
 
     // Cache the result with explanations
-    await this.redisService.set(cacheKey, JSON.stringify(resultsWithExplanations), 3600);
+    // await this.redisService.set(cacheKey, JSON.stringify(resultsWithExplanations), 3600);
 
     return resultsWithExplanations;
   }

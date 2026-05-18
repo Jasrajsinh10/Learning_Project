@@ -18,6 +18,7 @@ const searchForm = document.getElementById('search-form');
 const searchInput = document.getElementById('search-input');
 const searchResults = document.getElementById('search-results');
 const spinner = document.getElementById('loading-spinner');
+const voiceBtn = document.getElementById('voice-btn');
 
 // Initialize
 function init() {
@@ -143,13 +144,8 @@ async function handleLogout() {
     searchInput.value = '';
 }
 
-// Search Handler
-async function handleSearch(e) {
-    e.preventDefault();
-    
-    const query = searchInput.value.trim();
-    if (!query) return;
-    
+// Unified Search Execution
+async function executeSearch(query) {
     searchResults.innerHTML = '';
     spinner.classList.remove('hidden');
     
@@ -172,6 +168,130 @@ async function handleSearch(e) {
         renderResults(data);
     } catch (error) {
         showToast(error.message, 'error');
+    } finally {
+        spinner.classList.add('hidden');
+    }
+}
+
+// Search Handler
+async function handleSearch(e) {
+    e.preventDefault();
+    
+    const query = searchInput.value.trim();
+    if (!query) return;
+    
+    await executeSearch(query);
+}
+
+// Voice Search Capture and Streaming
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
+async function handleVoiceSearch() {
+    if (isRecording) {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+        }
+        isRecording = false;
+        voiceBtn.classList.remove('recording');
+        voiceBtn.title = 'Speak to Search';
+    } else {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) {
+                    audioChunks.push(e.data);
+                }
+            };
+
+            mediaRecorder.onstop = async () => {
+                stream.getTracks().forEach(track => track.stop());
+
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                await streamTranscription(audioBlob);
+            };
+
+            mediaRecorder.start();
+            isRecording = true;
+            voiceBtn.classList.add('recording');
+            voiceBtn.title = 'Stop and Transcribe';
+            showToast('Listening... Speak now.', 'success');
+        } catch (err) {
+            console.error('Error accessing microphone:', err);
+            showToast('Microphone access denied or not available.', 'error');
+        }
+    }
+}
+
+async function streamTranscription(audioBlob) {
+    searchResults.innerHTML = '';
+    spinner.classList.remove('hidden');
+    searchInput.value = '';
+    searchInput.placeholder = 'Transcribing voice...';
+
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'recording.webm');
+
+    try {
+        const response = await fetch('/search/audio-stream', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error('Transcription streaming failed');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let accumulatedQuery = '';
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            const textChunk = decoder.decode(value, { stream: true });
+            const lines = textChunk.split('\n');
+
+            for (const line of lines) {
+                if (line.trim().startsWith('data: ')) {
+                    const dataPayload = line.replace('data: ', '').trim();
+                    if (dataPayload === '[DONE]') {
+                        break;
+                    }
+                    try {
+                        const parsed = JSON.parse(dataPayload);
+                        if (parsed.text) {
+                            accumulatedQuery += ' ' + parsed.text;
+                            searchInput.value = accumulatedQuery.trim();
+                        }
+                    } catch (e) {
+                        // Incomplete chunk
+                    }
+                }
+            }
+        }
+
+        const finalQuery = searchInput.value.trim();
+        if (finalQuery) {
+            showToast(`Transcribed: "${finalQuery}". Searching...`, 'success');
+            await executeSearch(finalQuery);
+        } else {
+            showToast('Could not hear or transcribe any voice.', 'error');
+            searchInput.placeholder = 'e.g. A laptop with great battery life for coding...';
+        }
+
+    } catch (err) {
+        console.error('Transcription failed:', err);
+        showToast(err.message || 'Transcription error occurred', 'error');
+        searchInput.placeholder = 'e.g. A laptop with great battery life for coding...';
     } finally {
         spinner.classList.add('hidden');
     }
@@ -205,6 +325,7 @@ toggleAuthBtn.addEventListener('click', toggleAuthMode);
 authForm.addEventListener('submit', handleAuthSubmit);
 logoutBtn.addEventListener('click', handleLogout);
 searchForm.addEventListener('submit', handleSearch);
+voiceBtn.addEventListener('click', handleVoiceSearch);
 
 // Start
 init();

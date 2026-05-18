@@ -1,7 +1,8 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import * as path from 'path';
 import { promisify } from 'util';
+import { Readable } from 'stream';
 
 const execPromise = promisify(exec);
 
@@ -30,5 +31,13 @@ export class WhisperService {
       console.error(error);
       throw new InternalServerErrorException('Transcription failed');
     }
+  }
+
+  getTranslationStream(audioPath: string): Readable {
+    const pythonPath = path.join('/Users/ztlab58/Desktop/learning_goal_project/src/python-services/venv/bin/python');
+    const scriptPath = path.join('/Users/ztlab58/Desktop/learning_goal_project/src/python-services/transcribe_stream.py');
+
+    const child = spawn(pythonPath, [scriptPath, audioPath]);
+    return child.stdout;
   }
 }
