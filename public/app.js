@@ -185,37 +185,78 @@ async function handleSearch(e) {
 
 // Voice Search Capture and Streaming
 let mediaRecorder = null;
-let audioChunks = [];
 let isRecording = false;
+let audioChunks = [];
+let audioStream = null;
+let currentTranscriptionId = 0;
 
 async function handleVoiceSearch() {
     if (isRecording) {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-        }
         isRecording = false;
         voiceBtn.classList.remove('recording');
         voiceBtn.title = 'Speak to Search';
+        
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+        }
     } else {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(audioStream);
             audioChunks = [];
+            currentTranscriptionId = 0;
 
-            mediaRecorder.ondataavailable = (e) => {
+            searchResults.innerHTML = '';
+            searchInput.value = '';
+            searchInput.placeholder = 'Listening... Speak now.';
+
+            mediaRecorder.ondataavailable = async (e) => {
                 if (e.data && e.data.size > 0) {
                     audioChunks.push(e.data);
+                    
+                    // Only translate periodically while recording is active.
+                    // When stopped, mediaRecorder.state changes to 'inactive'.
+                    if (mediaRecorder.state === 'recording') {
+                        const accumulatedBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        await sendAudioChunk(accumulatedBlob);
+                    }
                 }
             };
 
             mediaRecorder.onstop = async () => {
-                stream.getTracks().forEach(track => track.stop());
+                if (audioStream) {
+                    audioStream.getTracks().forEach(track => track.stop());
+                }
 
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                await streamTranscription(audioBlob);
+                searchResults.innerHTML = '';
+                spinner.classList.remove('hidden');
+                const originalPlaceholder = searchInput.placeholder;
+                searchInput.placeholder = 'Finalizing transcription...';
+
+                try {
+                    if (audioChunks.length > 0) {
+                        const finalBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        await sendAudioChunk(finalBlob);
+                    }
+
+                    const finalQuery = searchInput.value.trim();
+                    if (finalQuery) {
+                        showToast(`Transcribed: "${finalQuery}". Searching...`, 'success');
+                        await executeSearch(finalQuery);
+                    } else {
+                        showToast('Could not hear or transcribe any voice.', 'error');
+                        searchInput.placeholder = originalPlaceholder;
+                    }
+                } catch (err) {
+                    console.error('Final transcription/search failed:', err);
+                    showToast('Transcription failed.', 'error');
+                    searchInput.placeholder = originalPlaceholder;
+                } finally {
+                    spinner.classList.add('hidden');
+                }
             };
 
-            mediaRecorder.start();
+            mediaRecorder.start(5000);
             isRecording = true;
             voiceBtn.classList.add('recording');
             voiceBtn.title = 'Stop and Transcribe';
@@ -227,17 +268,13 @@ async function handleVoiceSearch() {
     }
 }
 
-async function streamTranscription(audioBlob) {
-    searchResults.innerHTML = '';
-    spinner.classList.remove('hidden');
-    searchInput.value = '';
-    searchInput.placeholder = 'Transcribing voice...';
-
+async function sendAudioChunk(audioBlob) {
+    const transcriptionId = ++currentTranscriptionId;
     const formData = new FormData();
-    formData.append('file', audioBlob, 'recording.webm');
+    formData.append('file', audioBlob, 'chunk.webm');
 
     try {
-        const response = await fetch('/search/audio-stream', {
+        const response = await fetch('/whisper/translate', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -246,56 +283,89 @@ async function streamTranscription(audioBlob) {
         });
 
         if (!response.ok) {
-            throw new Error('Transcription streaming failed');
+            throw new Error('Chunk transcription failed');
         }
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let accumulatedQuery = '';
+        const text = await response.text();
 
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-
-            const textChunk = decoder.decode(value, { stream: true });
-            const lines = textChunk.split('\n');
-
-            for (const line of lines) {
-                if (line.trim().startsWith('data: ')) {
-                    const dataPayload = line.replace('data: ', '').trim();
-                    if (dataPayload === '[DONE]') {
-                        break;
-                    }
-                    try {
-                        const parsed = JSON.parse(dataPayload);
-                        if (parsed.text) {
-                            accumulatedQuery += ' ' + parsed.text;
-                            searchInput.value = accumulatedQuery.trim();
-                        }
-                    } catch (e) {
-                        // Incomplete chunk
-                    }
-                }
-            }
-        }
-
-        const finalQuery = searchInput.value.trim();
-        if (finalQuery) {
-            showToast(`Transcribed: "${finalQuery}". Searching...`, 'success');
-            await executeSearch(finalQuery);
-        } else {
-            showToast('Could not hear or transcribe any voice.', 'error');
-            searchInput.placeholder = 'e.g. A laptop with great battery life for coding...';
+        if (transcriptionId === currentTranscriptionId) {
+            searchInput.value = text.trim();
         }
 
     } catch (err) {
-        console.error('Transcription failed:', err);
-        showToast(err.message || 'Transcription error occurred', 'error');
-        searchInput.placeholder = 'e.g. A laptop with great battery life for coding...';
-    } finally {
-        spinner.classList.add('hidden');
+        console.error('Chunk transcription failed:', err);
     }
 }
+
+// async function streamTranscription(audioBlob) {
+//     searchResults.innerHTML = '';
+//     spinner.classList.remove('hidden');
+//     searchInput.value = '';
+//     searchInput.placeholder = 'Transcribing voice...';
+
+//     const formData = new FormData();
+//     formData.append('file', audioBlob, 'recording.webm');
+
+//     try {
+//         const response = await fetch('/search/audio-stream', {
+//             method: 'POST',
+//             headers: {
+//                 'Authorization': `Bearer ${localStorage.getItem('token')}`
+//             },
+//             body: formData
+//         });
+
+//         if (!response.ok) {
+//             throw new Error('Transcription streaming failed');
+//         }
+
+//         const reader = response.body.getReader();
+//         const decoder = new TextDecoder('utf-8');
+//         let accumulatedQuery = '';
+
+//         while (true) {
+//             const { value, done } = await reader.read();
+//             if (done) break;
+
+//             const textChunk = decoder.decode(value, { stream: true });
+//             const lines = textChunk.split('\n');
+
+//             for (const line of lines) {
+//                 if (line.trim().startsWith('data: ')) {
+//                     const dataPayload = line.replace('data: ', '').trim();
+//                     if (dataPayload === '[DONE]') {
+//                         break;
+//                     }
+//                     try {
+//                         const parsed = JSON.parse(dataPayload);
+//                         if (parsed.text) {
+//                             accumulatedQuery += ' ' + parsed.text;
+//                             searchInput.value = accumulatedQuery.trim();
+//                         }
+//                     } catch (e) {
+//                         // Incomplete chunk
+//                     }
+//                 }
+//             }
+//         }
+
+//         const finalQuery = searchInput.value.trim();
+//         if (finalQuery) {
+//             showToast(`Transcribed: "${finalQuery}". Searching...`, 'success');
+//             await executeSearch(finalQuery);
+//         } else {
+//             showToast('Could not hear or transcribe any voice.', 'error');
+//             searchInput.placeholder = 'e.g. A laptop with great battery life for coding...';
+//         }
+
+//     } catch (err) {
+//         console.error('Transcription failed:', err);
+//         showToast(err.message || 'Transcription error occurred', 'error');
+//         searchInput.placeholder = 'e.g. A laptop with great battery life for coding...';
+//     } finally {
+//         spinner.classList.add('hidden');
+//     }
+// }
 
 function renderResults(results) {
     console.log("renderResults received results:", results);

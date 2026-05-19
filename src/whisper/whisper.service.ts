@@ -33,11 +33,11 @@ export class WhisperService {
     }
   }
 
-  getTranslationStream(audioPath: string): Readable {
-    const pythonPath = path.join('/Users/ztlab58/Desktop/learning_goal_project/src/python-services/venv/bin/python');
-    const scriptPath = path.join('/Users/ztlab58/Desktop/learning_goal_project/src/python-services/transcribe_stream.py');
+  // getTranslationStream(audioPath: string): Readable {
+  //   const pythonPath = path.join('/Users/ztlab58/Desktop/learning_goal_project/src/python-services/venv/bin/python');
+  //   const scriptPath = path.join('/Users/ztlab58/Desktop/learning_goal_project/src/python-services/transcribe_stream.py');
 
-    const child = spawn(pythonPath, [scriptPath, audioPath]);
-    return child.stdout;
-  }
+  //   const child = spawn(pythonPath, [scriptPath, audioPath]);
+  //   return child.stdout;
+  // }
 }
