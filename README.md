@@ -1,98 +1,298 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# NexStore | AI-Powered Hybrid Search & Voice Portal
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+NexStore is a progressive backend server built with [NestJS](https://nestjs.com/) that implements a highly optimized, state-of-the-art hybrid search system. It combines semantic search (using vector embeddings) with traditional lexical full-text search, enhanced by AI relevance explanations and streaming audio transcription.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+---
 
-## Description
+## 🚀 Key Features
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+*   **Hybrid Search Engine**: Integrates lexical search (PostgreSQL Full-Text Search) with semantic search (`pgvector` cosine similarity) using **Reciprocal Rank Fusion (RRF)** to deliver highly accurate matches.
+*   **On-Premise Embedding Generation**: Generates 768-dimensional text embeddings locally on the server using `@xenova/transformers` with the `all-mpnet-base-v2` model.
+*   **Voice Search / Whisper Integration**: Accepts audio files, transcribes them using a local Python script running `faster-whisper` (on CPU, quantized to `int8`), and performs a product search using the resulting text.
+*   **Generative AI Explanations**: Uses Llama-3.3-70b via the **Groq SDK** to dynamically generate concise relevance explanations (under 10 words) for each search result.
+*   **Redis Caching Layer**: Caches search results for identical queries in Redis to minimize database loads and API latency.
+*   **Secure Authentication**: User signup, login, and token-based logout using JWT and bcrypt-hashed credentials stored in PostgreSQL.
+*   **Statically Served Frontend**: Built-in glassmorphic SPA UI to register/login, search, and perform real-time voice capture search.
 
-## Project setup
+---
 
-```bash
-$ npm install
+## 📐 System Architecture
+
+The following diagram illustrates how the system modules, databases, python scripts, and external APIs communicate with each other:
+
+```mermaid
+graph TD
+    Client[Web Client / Voice Search] -->|HTTP Request| API[NestJS API Gateway]
+    
+    %% Auth
+    API -->|Auth routes| UsersModule[Users Service]
+    UsersModule -->|Query/Auth| DB[(PostgreSQL DB)]
+    
+    %% Search
+    API -->|Search routes| SearchModule[Search Service]
+    SearchModule -->|1. Generate Embedding| Embedder[Local Transformers <br/> all-mpnet-base-v2]
+    SearchModule -->|2. Check Cache| Redis[(Redis Cache)]
+    
+    %% Whisper
+    Client -->|Audio Chunk| WhisperModule[Whisper Service]
+    WhisperModule -->|Spawn process| Python[Python transcribe.py <br/> faster-whisper]
+    Python -->|Transcribed Text| WhisperModule
+    WhisperModule -->|Text Query| Client
+    
+    %% Hybrid Search
+    SearchModule -->|3. Hybrid Search <br/> pgvector + FTS| DB
+    SearchModule -->|4. Generate Explanation| Groq[Groq API <br/> llama-3.3-70b-versatile]
+    SearchModule -->|5. Cache Results| Redis
+    SearchModule -->|6. Return Results| Client
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+## 💾 Database Schema
 
-# watch mode
-$ npm run start:dev
+The application uses PostgreSQL with the `pgvector` extension. Here is the SQL schema to set up the required tables:
 
-# production mode
-$ npm run start:prod
+```sql
+-- Enable necessary extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 1. Users Table
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    auth_token TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. Products Table
+CREATE TABLE IF NOT EXISTS products (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    category VARCHAR(100),
+    price NUMERIC,
+    embedding vector(768),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3. Generated Column & GIN Index for Full-Text Search
+ALTER TABLE products ADD COLUMN IF NOT EXISTS text_search_vector tsvector 
+GENERATED ALWAYS AS (to_tsvector('english', name || ' ' || description)) STORED;
+
+CREATE INDEX IF NOT EXISTS idx_products_fts ON products USING GIN(text_search_vector);
 ```
 
-## Run tests
+---
 
-```bash
-# unit tests
-$ npm run test
+## ⚙️ Environment Variables
 
-# e2e tests
-$ npm run test:e2e
+Create a `.env` file in the root directory and configure the following variables:
 
-# test coverage
-$ npm run test:cov
+```ini
+# Server Configuration
+PORT=3000
+
+# Database Configuration
+DB_URL=postgresql://username:password@localhost:5432/dbname
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=postgres
+DB_USER=postgres
+DB_PASSWORD=yourpassword
+
+# Redis Cache Configuration
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# JWT Authentication
+JWT_SECRET=your_jwt_signing_secret_here
+
+# Groq AI Service
+GROQ_API_KEY=gsk_your_groq_api_key_here
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## 🛠️ Installation & Setup
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### Prerequisites
+
+*   **Node.js** (v18 or higher recommended)
+*   **PostgreSQL** (with `pgvector` installed)
+*   **Redis Server**
+*   **Python 3.8+** (for Whisper transcribing service)
+
+### 1. Clone & Install Node Dependencies
 
 ```bash
-$ npm install -g mau
-$ mau deploy
+# Install NPM packages
+npm install
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### 2. Configure Python Environment for Whisper
 
-## Resources
+The transcribing service depends on `faster-whisper`. Create and configure the virtual environment inside `src/python-services/`:
 
-Check out a few resources that may come in handy when working with NestJS:
+```bash
+# Navigate to python-services directory
+cd src/python-services
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+# Create a virtual environment named 'venv'
+python3 -m venv venv
 
-## Support
+# Activate the environment
+source venv/bin/activate
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+# Install dependencies
+pip install faster-whisper
 
-## Stay in touch
+# Return to root directory
+cd ../..
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### 3. Run Database Migrations & Seeds
 
-## License
+To add the full-text search indexes/columns, run the migration script:
+```bash
+# Run migration script
+npx ts-node src/database/migrations/migration.ts
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+If you wish to seed the database with initial products, you can configure and uncomment `seed.ts` and run it:
+```bash
+npx ts-node seed.ts
+```
+
+---
+
+## 💻 Running the Application
+
+```bash
+# Development (with hot-reload)
+npm run start:dev
+
+# Production build
+npm run build
+npm run start:prod
+
+# Run Tests
+npm run test
+```
+
+---
+
+## 🔌 API Endpoints
+
+### 🔐 Authentication (`UsersModule`)
+
+#### 1. User Registration
+*   **Endpoint**: `POST /users/register`
+*   **Request Body**:
+    ```json
+    {
+      "username": "johndoe",
+      "password": "securepassword"
+    }
+    ```
+*   **Response**:
+    ```json
+    {
+      "success": true,
+      "user": {
+        "id": "user-uuid",
+        "username": "johndoe"
+      }
+    }
+    ```
+
+#### 2. User Login
+*   **Endpoint**: `POST /users/login`
+*   **Request Body**:
+    ```json
+    {
+      "username": "johndoe",
+      "password": "securepassword"
+    }
+    ```
+*   **Response**:
+    ```json
+    {
+      "success": true,
+      "access_token": "jwt-token-string",
+      "user": {
+        "id": "user-uuid",
+        "username": "johndoe"
+      }
+    }
+    ```
+
+#### 3. User Logout
+*   **Endpoint**: `POST /users/logout`
+*   **Headers**: `Authorization: Bearer <token>`
+*   **Response**:
+    ```json
+    {
+      "success": true,
+      "message": "Logged out successfully"
+    }
+    ```
+
+---
+
+### 🔍 Product Search (`SearchModule` / `WhisperModule`)
+
+#### 1. Unified Search (Hybrid)
+*   **Endpoint**: `GET /search?search=<query>`
+*   **Headers**: `Authorization: Bearer <token>`
+*   **Response**:
+    ```json
+    [
+      {
+        "id": "product-uuid",
+        "name": "Mechanical Keyboard",
+        "description": "Tactile switch mechanical keyboard ideal for programmers.",
+        "hybrid_score": 0.03333,
+        "relevance_explanation": "Product description explicitly mentions 'programmers' seeking mechanical switches."
+      }
+    ]
+    ```
+
+#### 2. Add New Product(s)
+*   **Endpoint**: `POST /search/add-product`
+*   **Request Body**:
+    ```json
+    [
+      {
+        "name": "Wireless Mouse",
+        "description": "Ergonomic wireless mouse with customizable keys.",
+        "category": "electronics",
+        "price": 49.99
+      }
+    ]
+    ```
+*   **Response**:
+    ```json
+    [
+      {
+        "id": "new-product-uuid",
+        "name": "Wireless Mouse",
+        "description": "Ergonomic wireless mouse with customizable keys.",
+        "category": "electronics",
+        "price": "49.99"
+      }
+    ]
+    ```
+
+#### 3. Audio Search Translation
+*   **Endpoint**: `POST /whisper/translate`
+*   **Headers**: `Authorization: Bearer <token>`
+*   **Request Body**: `multipart/form-data` with key `file` containing the audio recording (e.g., `.webm` or `.wav`).
+*   **Response**: Raw transcribed text (string).
+
+---
+
+## 📄 License
+
+This project is [MIT licensed](LICENSE).
